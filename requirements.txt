@@ -1,0 +1,15 @@
+pandas
+numpy
+scikit-learn
+pandas==2.0.3
+numpy==1.24.3
+scipy==1.15.3
+scikit-learn==1.3.0
+xgboost
+lightgbm
+pefile
+pefile==2024.8.26
+watchdog
+joblib
+joblib==1.5.2
+matplotlib

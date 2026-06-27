@@ -1,0 +1,10 @@
+py install 3.11
+cd "C:\ransomware detection"
+
+py -3.11 -m venv .venv
+.\.venv\Scripts\activate
+
+python -m pip install --upgrade pip setuptools wheel
+pip install -r requirements.txt
+
+python -B -c "from pathlib import Path; import joblib; from src.extractor.pe_extractor import PEFeatureExtractor; f=Path('C:\\samples\\sample.exe'); df=PEFeatureExtractor().to_dataframe(f); b=joblib.load('models\\ransomware_detector_pe.pkl'); p=b['model'].predict(df)[0]; prob=b['model'].predict_proba(df)[0][1]; print('Prediction:', 'Ransomware' if p == 1 else 'Non-ransomware'); print('Probability:', prob)"
