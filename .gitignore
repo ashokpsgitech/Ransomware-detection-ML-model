@@ -17,6 +17,8 @@ env/
 datasets/*.csv
 datasets/*.xlsx
 datasets/*.json
+!datasets/Final_Dataset_without_duplicate.csv
+!datasets/my_ransomware_samples.csv
 models/*.pkl
 models/*.joblib
 reports/*.png
