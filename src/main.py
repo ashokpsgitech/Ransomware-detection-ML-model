@@ -42,8 +42,29 @@ def make_monitor_callback(predictor: Predictor, notify_url: str) -> Callable[[Pa
                 "TextRawToVirtualRatio": f"{features.get('TextRawToVirtualRatio', 0.0):.6f}",
             }
 
+            # Get model evaluation metrics
+            metrics = predictor.bundle.get("metrics", {}) if predictor.bundle else {}
+            metrics_lines = []
+            if metrics:
+                metrics_lines = [
+                    "Model Global Performance Metrics (for reference):",
+                    f"  Accuracy:               {metrics.get('accuracy', 0.0) * 100:.2f}%",
+                    f"  Precision:              {metrics.get('precision', 0.0) * 100:.2f}%",
+                    f"  Recall:                 {metrics.get('recall', 0.0) * 100:.2f}%",
+                    f"  F1 Score:               {metrics.get('f1', 0.0) * 100:.2f}%",
+                    f"  ROC AUC:                {metrics.get('roc_auc', 0.0):.4f}",
+                    f"  PR AUC:                 {metrics.get('pr_auc', 0.0):.4f}",
+                    f"  Training Time:          {metrics.get('training_time_seconds', 0.0):.4f} seconds",
+                    f"  Avg Inference Time:     {metrics.get('avg_inference_time_ms', 0.0):.6f} ms per sample",
+                    "  Confusion Matrix:       "
+                    f"TN={metrics.get('true_negatives', 0.0):.0f}  FP={metrics.get('false_positives', 0.0):.0f} / "
+                    f"FN={metrics.get('false_negatives', 0.0):.0f}  TP={metrics.get('true_positives', 0.0):.0f}",
+                ]
+            else:
+                metrics_lines = ["  Model Global Performance Metrics: [Not Available]"]
+
             # Print a detailed scan report
-            report = "\n".join([
+            report_lines = [
                 "=" * 60,
                 f"SCAN REPORT FOR NEW EXECUTABLE: {file_path.name}",
                 "-" * 60,
@@ -59,8 +80,11 @@ def make_monitor_callback(predictor: Predictor, notify_url: str) -> Callable[[Pa
                 "Model Prediction Output:",
                 f"  Predicted Category:     {category.upper()}",
                 f"  Ransomware Probability: {prob * 100:.2f}%",
+                "-" * 60,
+            ] + metrics_lines + [
                 "=" * 60
-            ])
+            ]
+            report = "\n".join(report_lines)
             logger.info("\n%s\n", report)
 
             if label == 1:
