@@ -1,453 +1,134 @@
-# Real-Time Pre-Execution Ransomware Detection
+# Real-Time Pre-Execution Ransomware Detection Project
 
-Windows-focused internship project for detecting possible ransomware before execution using static Portable Executable (PE) features and machine learning.
+An internship project for Windows-focused pre-execution ransomware detection. The system intercepts newly downloaded or copied files in real time (within a Docker container), extracts static Portable Executable (PE) header/section features, and tests them against a trained Machine Learning model. If ransomware is detected, the container bridges the alert back to the Windows host to trigger a native Windows Toast notification before the file runs.
 
-The project trains a PE-only ransomware classifier, extracts PE header/section features from executable files, and predicts whether a sample is likely ransomware.
+---
 
-## Current Status
+## System Architecture
 
-Implemented:
+The project consists of a **host-side notification bridge** and a **containerized folder monitoring daemon**:
 
-- Dataset preprocessing
-- PE-only feature allowlist
-- Random Forest training pipeline
-- Evaluation metrics
-- PE feature extractor using `pefile`
-- Ransomware sample feature-dataset builder
-- Custom model training using original dataset plus extracted ransomware samples
+```mermaid
+graph TD
+    subgraph Windows Host
+        Dir[Monitored Folder e.g. Downloads]
+        Bridge[Notification Host Bridge<br>Python HTTP Server - port: 5454]
+        Toast[Windows Toast Notification]
+    end
 
-Not yet implemented:
+    subgraph Docker Container
+        Monitor[Folder Monitor watchdog]
+        Extractor[PE Feature Extractor pefile]
+        Model[Trained RF Classifier models/]
+    end
 
-- Clean predictor CLI
-- Real-time folder monitor integration
-- Desktop/UI alert system
-
-## Architecture
-
-```text
-Dataset / PE Samples
-        |
-        v
-PE Feature Preprocessing
-        |
-        v
-Model Training
-        |
-        v
-Trained Model (.pkl)
-        |
-        v
-PE Feature Extractor
-        |
-        v
-Prediction
+    Dir -- Mounted Volume --> Monitor
+    Monitor -- Detects new EXE --> Extractor
+    Extractor -- Extracts 57 features --> Model
+    Model -- Predicts Ransomware --> Monitor
+    Monitor -- HTTP POST /notify --> Bridge
+    Bridge -- PowerShell WinRT --> Toast
 ```
 
-## Project Structure
+---
 
-```text
-.
-├── datasets/
-│   ├── Final_Dataset_without_duplicate.csv
-│   └── my_ransomware_samples.csv
-├── models/
-├── reports/
-├── src/
-│   ├── data/
-│   │   ├── preprocess.py
-│   │   └── sample_dataset_builder.py
-│   ├── evaluation/
-│   │   └── evaluate.py
-│   ├── extractor/
-│   │   └── pe_extractor.py
-│   ├── inference/
-│   │   └── predictor.py
-│   ├── monitor/
-│   │   └── folder_monitor.py
-│   ├── training/
-│   │   └── train.py
-│   └── utils/
-├── tests/
-├── requirements.txt
-└── README.md
-```
+## Dataset & Preprocessing Pipeline
 
-## Important Safety Notes
+### 1. Dataset Split and Composition
+*   **Total Dataset Size**: 21,752 executable records (balanced evenly with 10,876 Benign files and 10,876 Malware files).
+*   **Malware Target Classes**: Includes 26 malware families, with ransomware categories (such as Cerber, Dharma, Shade, WannaCry, Ryuk, etc.) and other malware classes (RAT, Stealers, Trojans).
+*   **Custom Samples**: An additional dataset (`my_ransomware_samples.csv`) compiled from 27 real ransomware binaries was merged during training to enhance zero-day detection capability.
+*   **Split Ratio**: 80% Training Set (13,677 samples) and 20% Test Set (3,420 samples), stratified to preserve the class balance.
 
-Do not run ransomware samples on your normal machine.
+### 2. Preprocessing & Feature Engineering (`src/data/preprocess.py`)
+To build a reliable **pre-execution** model, we must strip all dynamic runtime features because they cannot be gathered before a program actually executes. The pipeline includes:
+*   **Binary Labeling**: Creates a binary target column where `1` represents `Category == Ransomware` and `0` represents goodware or other non-ransomware categories.
+*   **Feature Filtering**: Drops data-leakage columns (`md5`, `sha1`, `Class`, `Category`, `Family`) and all post-execution behavioral columns (such as `registry_read/write`, `network_connections`, `files_malicious`, etc.).
+*   **Numeric Conversion**: Parses PE numeric fields and hex strings (e.g. `0x00400000`) into standard floats.
+*   **Ratio Features**: Calculates engineered PE ratios used to identify obfuscation/packing:
+    *   `CodeDensity` = `SizeOfCode` / `SizeOfImage`
+    *   `HeaderRatio` = `SizeOfHeaders` / `SizeOfImage`
+    *   `TextRawToVirtualRatio` = `text_SizeOfRawData` / `text_VirtualSize`
+    *   `RdataRawToVirtualRatio` = `rdata_SizeOfRawData` / `rdata_VirtualSize`
+*   **Dimensionality Reduction**: Automatically removes constant features (features containing only a single value) and duplicate rows.
 
-Recommended setup for malware samples:
+---
 
-```text
-VirtualBox Windows VM
-Network disabled
-Shared clipboard disabled
-Drag and drop disabled
-No shared folders after sample transfer
-Snapshot before adding samples
-Never double-click or execute samples
-Only read samples with the PE extractor
-```
+## Model Evaluation Metrics
 
-The extractor only reads PE file headers and sections. It does not execute the file.
+Evaluated on the test set (3,420 samples) after training a Random Forest classifier (300 estimators, balanced weights):
 
-## Python Version
+| Parameter | Value | Interpretation |
+| :--- | :--- | :--- |
+| **Accuracy** | **97.69%** | Percentage of overall files correctly identified. |
+| **Precision** | **95.90%** | When the model flags a file as ransomware, it is correct 95.90% of the time (low false-positive rate). |
+| **Recall** | **77.23%** | The model successfully intercepts 77.23% of all actual ransomware files in the test set. |
+| **F1 Score** | **85.56%** | Balance between Precision and Recall. |
+| **ROC AUC** | **0.9819** | Area under the Receiver Operating Characteristic curve. |
+| **PR AUC** | **0.9312** | Area under the Precision-Recall curve (ideal for imbalanced data evaluation). |
+| **Training Time** | **1.5118 seconds** | Total fit time for the Random Forest pipeline. |
+| **Avg Inference Time** | **0.029646 ms** | Time taken *per sample* to run feature alignment and predict ransomware class. |
+| **Confusion Matrix** | **TN=3107  FP=10**<br>**FN=69   TP=234** | **TN**: Benign correctly identified<br>**TP**: Ransomware correctly stopped<br>**FP**: Benign files incorrectly flagged<br>**FN**: Ransomware files missed |
 
-Use Python 3.10 or Python 3.11.
+---
 
-Do not use Python 3.14 for this project. Some pinned ML packages and saved model files are not compatible with it.
+## Execution Guide: From Scratch
 
-Check installed Python versions:
+Follow these steps to set up and run the entire project on a new Windows machine:
 
-```cmd
-py -0p
-```
+### Step 1: Install Prerequisites
+1.  **Python 3.11**: Ensure Python 3.11 is installed (preferred for package compatibility).
+2.  **Docker Desktop**: Install and start Docker Desktop (ensure the Docker whale icon in the taskbar is active).
 
-If Python 3.11 is missing, install it:
-
-```cmd
-py install 3.11
-```
-
-Or download it from:
-
-```text
-https://www.python.org/downloads/release/python-3119/
-```
-
-During install, enable:
-
-```text
-Add python.exe to PATH
-```
-
-## Setup On A New Machine
-
-Clone the repository:
-
-```cmd
+### Step 2: Clone and Setup Environment
+Open a Windows PowerShell terminal:
+```powershell
+# Clone the repository
 git clone https://github.com/ashokpsgitech/Ransomware-detection-ML-model.git
 cd Ransomware-detection-ML-model
-```
 
-Create a Python 3.11 virtual environment:
-
-```cmd
+# Create a virtual environment
 py -3.11 -m venv .venv
 .\.venv\Scripts\activate
-```
 
-Upgrade build tools:
-
-```cmd
-python -m pip install --upgrade pip setuptools wheel
-```
-
-Install dependencies:
-
-```cmd
-pip install -r requirements.txt
-```
-
-Verify versions:
-
-```cmd
-python -c "import sklearn, pandas, numpy; print(sklearn.__version__); print(pandas.__version__); print(numpy.__version__)"
-```
-
-Expected versions:
-
-```text
-1.3.0
-2.0.3
-1.24.3
-```
-
-Run tests:
-
-```cmd
-python -B -m pytest tests
-```
-
-## Dataset Files
-
-Tracked training datasets:
-
-```text
-datasets/Final_Dataset_without_duplicate.csv
-datasets/my_ransomware_samples.csv
-```
-
-Ignored generated files:
-
-```text
-models/*.pkl
-models/*.joblib
-reports/*.json
-reports/*.png
-reports/*.pdf
-reports/*.html
-.venv/
-```
-
-This means a new user can train locally, but generated models and reports are not committed by default.
-
-## Preprocess Dataset
-
-Run preprocessing and write a dataset profile:
-
-```cmd
-python -B -m src.data.preprocess --dataset datasets\Final_Dataset_without_duplicate.csv --profile-output reports\dataset_profile_pe.json
-```
-
-This creates:
-
-```text
-reports/dataset_profile_pe.json
-```
-
-The preprocessing step:
-
-- Creates binary target: `1` for `Category == Ransomware`, else `0`
-- Drops leakage columns like `md5`, `sha1`, `Class`, `Category`, `Family`
-- Keeps only PE-derived features
-- Converts PE hex-like strings into numbers
-- Adds ratio features
-- Removes duplicate cleaned rows
-
-## Train PE-Only Model
-
-Train using the original PE-only dataset:
-
-```cmd
-python -B -m src.training.train --dataset datasets\Final_Dataset_without_duplicate.csv --model-output models\ransomware_detector_pe.pkl --metrics-output reports\training_metrics_pe.json --profile-output reports\dataset_profile_pe.json --n-estimators 300
-```
-
-Generated files:
-
-```text
-models\ransomware_detector_pe.pkl
-reports\training_metrics_pe.json
-reports\dataset_profile_pe.json
-```
-
-## Extract Features From Real Ransomware Samples
-
-Place samples inside the VM:
-
-```cmd
-mkdir C:\samples\ransomware
-```
-
-Put all ransomware files in:
-
-```text
-C:\samples\ransomware
-```
-
-File names and extensions do not matter. The script scans every file and keeps only valid PE files.
-
-Extract PE features into a CSV:
-
-```cmd
-python -B -m src.data.sample_dataset_builder --samples "C:\samples\ransomware" --label Ransomware --output datasets\my_ransomware_samples.csv
-```
-
-Check the extracted dataset:
-
-```cmd
-python -c "import pandas as pd; df=pd.read_csv('datasets\\my_ransomware_samples.csv'); print(df.shape); print(df.head())"
-```
-
-If the row count is `0`, the files may be zipped, encrypted, corrupted, or not valid PE files.
-
-## Train Custom Model With Original Dataset Plus Sample Dataset
-
-Train with both datasets:
-
-```cmd
-python -B -m src.training.train --dataset datasets\Final_Dataset_without_duplicate.csv --dataset datasets\my_ransomware_samples.csv --model-output models\ransomware_detector_custom.pkl --metrics-output reports\training_metrics_custom.json --profile-output reports\dataset_profile_custom.json --n-estimators 300
-```
-
-Generated files:
-
-```text
-models\ransomware_detector_custom.pkl
-reports\training_metrics_custom.json
-reports\dataset_profile_custom.json
-```
-
-Use this custom model for future predictions:
-
-```text
-models\ransomware_detector_custom.pkl
-```
-
-## Test A Real EXE With The Model
-
-Test one executable file:
-
-```cmd
-python -B -c "from pathlib import Path; import joblib; from src.extractor.pe_extractor import PEFeatureExtractor; f=Path('C:\\samples\\ransomware\\YOUR_SAMPLE_NAME'); df=PEFeatureExtractor().to_dataframe(f); b=joblib.load('models\\ransomware_detector_custom.pkl'); p=b['model'].predict(df)[0]; prob=b['model'].predict_proba(df)[0][1]; print('Prediction:', 'Ransomware' if p == 1 else 'Non-ransomware'); print('Probability:', prob)"
-```
-
-Replace:
-
-```text
-YOUR_SAMPLE_NAME
-```
-
-with the actual file name.
-
-For a benign smoke test, use a trusted Windows executable:
-
-```cmd
-python -B -c "from pathlib import Path; import sys, joblib; from src.extractor.pe_extractor import PEFeatureExtractor; f=Path(sys.executable); df=PEFeatureExtractor().to_dataframe(f); b=joblib.load('models\\ransomware_detector_custom.pkl'); p=b['model'].predict(df)[0]; prob=b['model'].predict_proba(df)[0][1]; print('File:', f); print('Prediction:', 'Ransomware' if p == 1 else 'Non-ransomware'); print('Probability:', prob)"
-```
-
-## Delete Ransomware Samples After Feature Extraction
-
-After `datasets\my_ransomware_samples.csv` is created and the custom model is trained, delete the live samples:
-
-```cmd
-rmdir /s /q C:\samples\ransomware
-```
-
-Safer option:
-
-```text
-Restore the VirtualBox snapshot taken before adding malware samples.
-```
-
-The extracted CSV is only PE feature data, not executable malware.
-
-If you also want to delete the extracted CSV after training:
-
-```cmd
-del datasets\my_ransomware_samples.csv
-```
-
-Keep:
-
-```text
-models\ransomware_detector_custom.pkl
-```
-
-## What Reports Mean
-
-Dataset profiles:
-
-```text
-reports\dataset_profile_*.json
-```
-
-These include:
-
-- dataset shape
-- duplicate rows
-- missing values
-- target distribution
-- feature count
-- dropped columns
-
-Training metrics:
-
-```text
-reports\training_metrics_*.json
-```
-
-These include:
-
-- accuracy
-- precision
-- recall
-- F1 score
-- ROC AUC
-- confusion matrix values
-
-Reports are useful for the internship report and presentation, but they are not required to run prediction.
-
-## Common VM Error: scikit-learn Version Mismatch
-
-If you see warnings like:
-
-```text
-InconsistentVersionWarning
-Trying to unpickle estimator from version 1.3.0 when using version 1.9.0
-```
-
-or an error like:
-
-```text
-AttributeError: 'SimpleImputer' object has no attribute '_fill_dtype'
-```
-
-then your VM is using incompatible package versions.
-
-Fix it:
-
-```cmd
-cd "C:\ransomware detection"
-rmdir /s /q .venv
-py -3.11 -m venv .venv
-.\.venv\Scripts\activate
+# Install requirements
 python -m pip install --upgrade pip setuptools wheel
 pip install -r requirements.txt
 ```
 
-Then verify:
+### Step 3: Run Unit Tests
+To verify code logic and schema validation:
+```powershell
+# Install pytest
+pip install pytest
 
-```cmd
-python -c "import sklearn, pandas, numpy; print(sklearn.__version__); print(pandas.__version__); print(numpy.__version__)"
+# Run tests
+python -m pytest tests
 ```
 
-Expected:
-
-```text
-1.3.0
-2.0.3
-1.24.3
+### Step 4: Train the Custom Model
+Run the training pipeline to build the model using the preprocessed datasets:
+```powershell
+python -B -m src.training.train `
+    --dataset datasets/Final_Dataset_without_duplicate.csv `
+    --dataset datasets/my_ransomware_samples.csv `
+    --model-output models/ransomware_detector_custom.pkl `
+    --metrics-output reports/training_metrics_custom.json `
+    --profile-output reports/dataset_profile_custom.json `
+    --n-estimators 300
 ```
+This writes the model bundle to `models/ransomware_detector_custom.pkl`.
 
-## Git Commands
-
-Check local changes:
-
-```cmd
-git status
+### Step 5: Start the Real-Time Monitor
+Start the orchestrator launcher:
+```powershell
+.\run_monitor.ps1
 ```
+1.  **Monitor Folder**: Enter a path (e.g. `C:\Users\ashok\Downloads` or a dedicated test folder like `D:\test_monitor`).
+2.  **Powershell Bridge**: The script automatically launches `src/utils/notification_host.py` in a separate command window to listen on port `5454`.
+3.  **Docker Monitor**: The script builds the `ransomware-detector` Docker image and launches the container, mounting your selected folder.
 
-Commit code changes:
-
-```cmd
-git add .
-git commit -m "Update project instructions"
-```
-
-Push to GitHub:
-
-```cmd
-git push origin main
-```
-
-Do not force-add ignored model/report files unless you intentionally want to upload them.
-
-## Next Development Step
-
-Recommended next implementation:
-
-```text
-Predictor CLI
-```
-
-Target command:
-
-```cmd
-python -m src.inference.predictor --file "C:\samples\sample.exe" --model models\ransomware_detector_custom.pkl
-```
-
-After that, implement:
-
-```text
-Folder monitor -> Extract PE features -> Predict -> Alert
-```
+### Step 6: Test Detection and Notification
+1.  Copy any Windows executable (e.g., a copy of `notepad.exe` or `python.exe`) and paste it into your monitored folder.
+2.  Watch the Docker terminal. You will see a detailed **Scan Report** printed showing the extracted PE features, predicted category (**`BENIGN`**), probability score, and the model's global parameters.
+3.  If a ransomware executable is placed inside, the container calls the host bridge, and a native **Windows Toast notification** will instantly alert you on your desktop.
