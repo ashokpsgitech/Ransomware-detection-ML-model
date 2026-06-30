@@ -29,12 +29,39 @@ def make_monitor_callback(predictor: Predictor, notify_url: str) -> Callable[[Pa
             label = predictor.predict(features)
             prob = predictor.predict_proba(features)
 
-            logger.info(
-                "Classification result for %s: Label=%d (Probability=%.2f%%)",
-                file_path.name,
-                label,
-                prob * 100,
-            )
+            category = "Ransomware" if label == 1 else "Benign"
+
+            # Prepare a list of key PE features to display
+            key_features = {
+                "EntryPoint": features.get("EntryPoint"),
+                "SizeOfCode": features.get("SizeOfCode"),
+                "SizeOfImage": features.get("SizeOfImage"),
+                "ImageBase": features.get("ImageBase"),
+                "CodeDensity": f"{features.get('CodeDensity', 0.0):.6f}",
+                "HeaderRatio": f"{features.get('HeaderRatio', 0.0):.6f}",
+                "TextRawToVirtualRatio": f"{features.get('TextRawToVirtualRatio', 0.0):.6f}",
+            }
+
+            # Print a detailed scan report
+            report = "\n".join([
+                "=" * 60,
+                f"SCAN REPORT FOR NEW EXECUTABLE: {file_path.name}",
+                "-" * 60,
+                "Extracted Key PE Features:",
+                f"  EntryPoint:             {key_features['EntryPoint']}",
+                f"  SizeOfCode:             {key_features['SizeOfCode']} bytes",
+                f"  SizeOfImage:            {key_features['SizeOfImage']} bytes",
+                f"  ImageBase:              {key_features['ImageBase']}",
+                f"  CodeDensity:            {key_features['CodeDensity']}",
+                f"  HeaderRatio:            {key_features['HeaderRatio']}",
+                f"  TextRawToVirtualRatio:  {key_features['TextRawToVirtualRatio']}",
+                "-" * 60,
+                "Model Prediction Output:",
+                f"  Predicted Category:     {category.upper()}",
+                f"  Ransomware Probability: {prob * 100:.2f}%",
+                "=" * 60
+            ])
+            logger.info("\n%s\n", report)
 
             if label == 1:
                 logger.warning("Ransomware threat detected: %s", file_path.name)
