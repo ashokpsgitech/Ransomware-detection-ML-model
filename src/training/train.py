@@ -116,6 +116,7 @@ class Trainer:
 
         bundle = {
             "model": model,
+            "metrics": metrics,
             "feature_columns": list(features.columns),
             "categorical_columns": self._get_categorical_features(features),
             "numeric_columns": self._get_numeric_features(

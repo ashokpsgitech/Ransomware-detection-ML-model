@@ -123,6 +123,12 @@ def main() -> None:
 
         features = extractor.extract(args.file)
         predictor = Predictor(args.model_path)
+        predictor.load_model()
+        if predictor.bundle and "metrics" in predictor.bundle:
+            from src.evaluation.evaluate import Evaluator
+            report = Evaluator().generate_report(predictor.bundle["metrics"])
+            logger.info("\nLoaded Model Metrics:\n%s\n", report)
+
         label = predictor.predict(features)
         prob = predictor.predict_proba(features)
         logger.info("Prediction: %s (Prob: %.2f%%)", "RANSOMWARE" if label == 1 else "Benign", prob * 100)
@@ -135,6 +141,10 @@ def main() -> None:
 
         predictor = Predictor(args.model_path)
         predictor.load_model()
+        if predictor.bundle and "metrics" in predictor.bundle:
+            from src.evaluation.evaluate import Evaluator
+            report = Evaluator().generate_report(predictor.bundle["metrics"])
+            logger.info("\nTrained Model Metrics:\n%s\n", report)
 
         callback = make_monitor_callback(predictor, args.notify_url)
         monitor = FolderMonitor(args.monitor_dir, callback)
