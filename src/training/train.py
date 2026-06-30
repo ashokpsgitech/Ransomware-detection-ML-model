@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import time
 from pathlib import Path
 from typing import Any
 
@@ -108,8 +109,10 @@ class Trainer:
             random_state=self.random_state,
             stratify=target,
         )
+        start_time = time.perf_counter()
         model = self.train(train_features, train_target)
-        metrics = Evaluator().evaluate(model, test_features, test_target)
+        training_time = time.perf_counter() - start_time
+        metrics = Evaluator().evaluate(model, test_features, test_target, training_time=training_time)
 
         bundle = {
             "model": model,

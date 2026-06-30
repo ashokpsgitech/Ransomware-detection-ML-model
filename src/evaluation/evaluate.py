@@ -1,15 +1,17 @@
-"""Model evaluation helpers."""
+"""Model evaluation helpers with extended metrics."""
 
 from __future__ import annotations
 
 import json
 import logging
+import time
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 from sklearn.metrics import (
     accuracy_score,
+    average_precision_score,
     confusion_matrix,
     f1_score,
     precision_score,
@@ -17,17 +19,28 @@ from sklearn.metrics import (
     roc_auc_score,
 )
 
-
 logger = logging.getLogger(__name__)
 
 
 class Evaluator:
-    """Evaluate ransomware detection models with standard classification metrics."""
+    """Evaluate ransomware detection models with standard and custom classification metrics."""
 
-    def evaluate(self, model: Any, features: pd.DataFrame, target: pd.Series) -> dict[str, float]:
+    def evaluate(
+        self,
+        model: Any,
+        features: pd.DataFrame,
+        target: pd.Series,
+        training_time: float = 0.0,
+    ) -> dict[str, float]:
         """Evaluate a trained model against labeled data."""
         logger.info("Evaluating model on %s rows.", len(features))
+
+        # Measure inference time over the test set
+        start_inf = time.perf_counter()
         predictions = model.predict(features)
+        end_inf = time.perf_counter()
+        avg_inference_time_ms = ((end_inf - start_inf) / len(features)) * 1000.0
+
         probabilities = self._predict_positive_probability(model, features)
         tn, fp, fn, tp = confusion_matrix(target, predictions, labels=[0, 1]).ravel()
 
@@ -37,6 +50,9 @@ class Evaluator:
             "recall": recall_score(target, predictions, zero_division=0),
             "f1": f1_score(target, predictions, zero_division=0),
             "roc_auc": roc_auc_score(target, probabilities) if probabilities is not None else 0.0,
+            "pr_auc": average_precision_score(target, probabilities) if probabilities is not None else 0.0,
+            "training_time_seconds": training_time,
+            "avg_inference_time_ms": avg_inference_time_ms,
             "true_negatives": float(tn),
             "false_positives": float(fp),
             "false_negatives": float(fn),
@@ -49,14 +65,17 @@ class Evaluator:
         logger.info("Generating evaluation report.")
         return "\n".join(
             [
-                f"Accuracy:  {metrics['accuracy']:.4f}",
-                f"Precision: {metrics['precision']:.4f}",
-                f"Recall:    {metrics['recall']:.4f}",
-                f"F1 Score:  {metrics['f1']:.4f}",
-                f"ROC AUC:   {metrics['roc_auc']:.4f}",
+                f"Accuracy:              {metrics['accuracy']:.4f}",
+                f"Precision:             {metrics['precision']:.4f}",
+                f"Recall:                {metrics['recall']:.4f}",
+                f"F1 Score:              {metrics['f1']:.4f}",
+                f"ROC AUC:               {metrics['roc_auc']:.4f}",
+                f"PR AUC:                {metrics['pr_auc']:.4f}",
+                f"Training Time:         {metrics['training_time_seconds']:.4f} seconds",
+                f"Avg Inference Time:    {metrics['avg_inference_time_ms']:.6f} ms per sample",
                 "Confusion Matrix:",
-                f"  TN={metrics['true_negatives']:.0f} FP={metrics['false_positives']:.0f}",
-                f"  FN={metrics['false_negatives']:.0f} TP={metrics['true_positives']:.0f}",
+                f"  TN={metrics['true_negatives']:.0f}  FP={metrics['false_positives']:.0f}",
+                f"  FN={metrics['false_negatives']:.0f}  TP={metrics['true_positives']:.0f}",
             ]
         )
 
