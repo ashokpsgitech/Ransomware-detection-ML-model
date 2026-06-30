@@ -77,7 +77,10 @@ Evaluated on the test set (3,420 samples) after training a Random Forest classif
 Follow these steps to set up and run the entire project on a new Windows machine:
 
 ### Step 1: Install Prerequisites
-1.  **Python 3.11**: Ensure Python 3.11 is installed (preferred for package compatibility).
+1.  **Python 3.11**: Ensure Python 3.11 is installed (preferred for package compatibility). If missing, you can install it via the Windows Python Launcher command:
+    ```cmd
+    py install 3.11
+    ```
 2.  **Docker Desktop**: Install and start Docker Desktop (ensure the Docker whale icon in the taskbar is active).
 
 ### Step 2: Clone and Setup Environment
