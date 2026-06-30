@@ -8,7 +8,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
-from watchdog.observers import Observer
+from watchdog.observers.polling import PollingObserver as Observer
 
 from src.extractor.pe_extractor import PEFeatureExtractor
 
